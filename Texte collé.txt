@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planning Athlétisme — Séances</title>
+<style>
+:root {
+  --bg: #f5f6fa;
+  --white: #ffffff;
+  --surface: #ffffff;
+  --surface2: #f0f2f8;
+  --accent: #1a56db;
+  --accent-light: #e8effe;
+  --accent2: #0ea5e9;
+  --green: #16a34a;
+  --green-light: #dcfce7;
+  --orange: #d97706;
+  --orange-light: #fef3c7;
+  --red: #dc2626;
+  --red-light: #fee2e2;
+  --gray: #6b7280;
+  --border: #e5e7eb;
+  --border2: #d1d5db;
+  --text: #111827;
+  --text2: #374151;
+  --text3: #6b7280;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.06);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* HEADER */
+header {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  box-shadow: var(--shadow-sm);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-icon { width: 36px; height: 36px; background: var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; flex-shrink: 0; }
+.brand-text h1 { font-size: .95rem; font-weight: 700; color: var(--text); }
+.brand-text p { font-size: .72rem; color: var(--text3); }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+.admin-pill { background: var(--accent); color: white; font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; display: none; }
+.btn { border: 1.5px solid var(--border2); background: var(--white); color: var(--text2); padding: 7px 14px; border-radius: var(--radius-sm); font-size: .82rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-primary:hover { background: #1447bf; border-color: #1447bf; color: white; }
+.btn-sm { padding: 5px 10px; font-size: .78rem; }
+.btn-green { background: #15803d; color: white; border-color: #15803d; }
+.btn-green:hover { background: #166534; color: white; border-color: #166534; }
+
+/* LAYOUT */
+.app-body { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
+
+/* NAV CALENDRIER */
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+.cal-nav-center { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cal-title { font-size: 1.1rem; font-weight: 700; min-width: 220px; text-align: center; }
+.view-toggle { display: flex; border: 1.5px solid var(--border2); border-radius: var(--radius-sm); overflow: hidden; }
+.view-btn { padding: 6px 14px; background: var(--white); border: none; color: var(--text3); cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .15s; }
+.view-btn.active { background: var(--accent); color: white; }
+.nav-btn { background: var(--white); border: 1.5px solid var(--border2); color: var(--text2); padding: 7px 16px; border-radius: var(--radius-sm); font-size: .82rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* CALENDRIER MOIS */
+.month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow-sm); }
+.cal-head { text-align: center; font-size: .7rem; font-weight: 700; color: var(--text3); padding: 6px 2px 10px; text-transform: uppercase; letter-spacing: .5px; }
+.cal-cell { min-height: 56px; border-radius: var(--radius-sm); border: 1.5px solid transparent; display: flex; flex-direction: column; align-items: center; padding: 6px 4px; cursor: pointer; transition: all .12s; position: relative; gap: 2px; }
+.cal-cell:hover:not(.cc-closed):not(.cc-empty):not(.cc-holiday) { background: var(--accent-light); border-color: var(--accent); }
+.cal-cell.cc-selected { background: var(--accent-light); border-color: var(--accent); }
+.cal-cell.cc-closed, .cal-cell.cc-holiday { background: #f9fafb; opacity: .55; cursor: not-allowed; }
+.cal-cell.cc-empty { cursor: default; }
+.cc-num { font-size: .85rem; font-weight: 700; }
+.cc-holiday .cc-num { color: var(--red); }
+.cc-tag { font-size: .55rem; color: var(--text3); text-align: center; line-height: 1.2; max-width: 100%; word-break: break-word; }
+.cc-holiday .cc-tag { color: var(--red); opacity: .8; }
+.cc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.cc-dot.d-green { background: var(--green); }
+.cc-dot.d-orange { background: var(--orange); }
+.cc-dot.d-red { background: var(--red); }
+
+/* VUE SEMAINE */
+.week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.wk-col { background: var(--white); border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); transition: border-color .12s; cursor: pointer; }
+.wk-col:hover:not(.wk-closed) { border-color: var(--accent); }
+.wk-col.wk-selected { border-color: var(--accent); box-shadow: 0 0 0 3px #1a56db22; }
+.wk-col.wk-closed { opacity: .45; cursor: not-allowed; }
+.wk-head { padding: 10px 6px; border-bottom: 1px solid var(--border); text-align: center; }
+.wk-dayname { font-size: .65rem; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+.wk-daynum { font-size: 1rem; font-weight: 700; }
+.wk-holiday { font-size: .58rem; color: var(--red); margin-top: 2px; }
+.wk-section { font-size: .6rem; font-weight: 700; color: var(--text3); text-align: center; padding: 4px; background: var(--bg); text-transform: uppercase; letter-spacing: .5px; }
+.wk-slot { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+.wk-slot-time { font-size: .65rem; font-weight: 700; }
+.wk-slot-count { font-size: .6rem; color: var(--text3); }
+.wk-bar { height: 3px; border-radius: 2px; margin-top: 3px; }
+.wk-slot.wk-locked { opacity: .4; }
+.wk-closed-label { padding: 12px 6px; font-size: .62rem; color: var(--text3); text-align: center; }
+
+/* PANEL JOUR */
+.day-panel { margin-top: 20px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.dp-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.dp-title { font-size: 1rem; font-weight: 700; }
+.dp-subtitle { font-size: .78rem; color: var(--text3); margin-top: 2px; }
+.dp-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* SLOTS */
+.slots-body { padding: 16px 20px; }
+.slot-group-title { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.slot-group { margin-bottom: 20px; }
+.slot-card { border: 1.5px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; transition: border-color .12s; }
+.slot-card.s-open { border-color: #86efac; background: #f0fdf4; }
+.slot-card.s-mid { border-color: #fcd34d; background: #fffbeb; }
+.slot-card.s-full { border-color: #fca5a5; background: #fef2f2; }
+.slot-card.s-locked { border-color: var(--border); background: #f9fafb; opacity: .7; }
+.slot-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+.slot-time { font-weight: 700; font-size: .88rem; min-width: 80px; }
+.slot-count-text { font-size: .78rem; color: var(--text3); flex: 1; }
+.slot-progress { width: 70px; height: 5px; background: var(--border2); border-radius: 3px; overflow: hidden; }
+.slot-progress-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.s-open .slot-progress-fill { background: var(--green); }
+.s-mid .slot-progress-fill { background: var(--orange); }
+.s-full .slot-progress-fill { background: var(--red); }
+.s-locked .slot-progress-fill { background: var(--text3); }
+.slot-badge { font-size: .67rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+.sb-open { background: var(--green-light); color: #15803d; }
+.sb-mid { background: var(--orange-light); color: #92400e; }
+.sb-full { background: var(--red-light); color: #991b1b; }
+.sb-locked { background: var(--surface2); color: var(--text3); }
+.slot-chevron { color: var(--text3); font-size: .75rem; transition: transform .15s; }
+.slot-chevron.open { transform: rotate(180deg); }
+.locked-msg { padding: 0 14px 8px; font-size: .74rem; color: var(--text3); font-style: italic; }
+.slot-body { padding: 0 14px 12px; }
+.athletes-list { margin-bottom: 8px; }
+.ath-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.ath-row:last-child { border-bottom: none; }
+.ath-num { font-size: .7rem; color: var(--text3); min-width: 18px; }
+.ath-name { flex: 1; font-weight: 500; }
+.ath-role-badge { font-size: .67rem; padding: 1px 7px; border-radius: 20px; font-weight: 600; }
+.role-athlete { background: #e0f2fe; color: #0369a1; }
+.role-encadrant { background: #f3e8ff; color: #7c3aed; }
+.ath-actions { display: flex; gap: 3px; }
+.ath-btn { background: none; border: none; cursor: pointer; color: var(--text3); font-size: .78rem; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all .12s; }
+.ath-btn:hover { background: var(--surface2); }
+.ath-btn.del:hover { color: var(--red); background: var(--red-light); }
+.ath-btn.mv:hover { color: var(--accent); background: var(--accent-light); }
+.empty-slot { padding: 6px 0; font-size: .8rem; color: var(--text3); font-style: italic; }
+.add-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+input.field, select.field { border: 1.5px solid var(--border2); border-radius: var(--radius-sm); padding: 6px 10px; font-size: .82rem; color: var(--text); background: var(--white); outline: none; transition: border-color .12s; }
+input.field:focus, select.field:focus { border-color: var(--accent); }
+input.field { flex: 1; min-width: 140px; }
+select.field { min-width: 110px; cursor: pointer; }
+.full-msg { text-align: center; padding: 6px; font-size: .78rem; color: var(--red); font-weight: 600; }
+
+/* ADMIN PANEL */
+.admin-section { margin-top: 20px; background: var(--white); border: 1.5px solid #bfdbfe; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
+.admin-section h3 { font-size: .88rem; font-weight: 700; color: var(--accent); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media(max-width:640px){ .admin-grid { grid-template-columns: 1fr; } }
+.admin-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; }
+.admin-card h4 { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); margin-bottom: 12px; font-weight: 700; }
+.toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: .85rem; }
+.toggle-wrap { width: 40px; height: 22px; background: var(--border2); border-radius: 11px; cursor: pointer; position: relative; transition: background .15s; flex-shrink: 0; }
+.toggle-wrap.on { background: var(--accent); }
+.toggle-wrap::after { content:''; position: absolute; width: 16px; height: 16px; background: white; border-radius: 50%; top: 3px; left: 3px; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle-wrap.on::after { left: 21px; }
+.prio-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.prio-row:last-child { border-bottom: none; }
+.prio-label { flex: 1; }
+.prio-btns { display: flex; gap: 3px; }
+.prio-btn { width: 26px; height: 26px; border: 1px solid var(--border2); background: var(--white); border-radius: 4px; cursor: pointer; font-size: .75rem; display: flex; align-items: center; justify-content: center; color: var(--text2); transition: all .12s; }
+.prio-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cap-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.cap-row:last-child { border-bottom: none; }
+.cap-input { width: 56px; border: 1px solid var(--border2); border-radius: 4px; padding: 3px 6px; font-size: .82rem; text-align: center; background: var(--white); }
+.close-date-wrap { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.closed-list { font-size: .75rem; color: var(--text3); }
+
+/* MODAL */
+.modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; align-items: center; justify-content: center; }
+.modal-bg.show { display: flex; }
+.modal-box { background: var(--white); border-radius: var(--radius); padding: 24px; max-width: 420px; width: 92%; box-shadow: 0 20px 60px rgba(0,0,0,.15); }
+.modal-box h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+.modal-box p { font-size: .83rem; color: var(--text3); margin-bottom: 16px; }
+.modal-fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.modal-fields label { font-size: .78rem; color: var(--text3); margin-bottom: 3px; display: block; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.err-msg { font-size: .78rem; color: var(--red); margin-top: 6px; display: none; }
+
+/* TOAST */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; border-radius: var(--radius-sm); padding: 10px 18px; font-size: .84rem; font-weight: 500; z-index: 500; opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; max-width: 300px; }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.t-success { background: #15803d; }
+.toast.t-error { background: var(--red); }
+
+/* WA */
+.btn-wa { background: #25d366; border-color: #25d366; color: white; }
+.btn-wa:hover { background: #1ebe5c; border-color: #1ebe5c; color: white; }
+
+/* Legend */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: .75rem; color: var(--text3); }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+@media(max-width: 600px) {
+  .week-grid { grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .wk-head { padding: 6px 2px; }
+  .wk-slot { padding: 3px 3px; }
+  .cal-title { font-size: .9rem; min-width: 160px; }
+  .slots-body { padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-icon">🏃</div>
+    <div class="brand-text">
+      <h1>Planning Athlétisme</h1>
+      <p>Nov 2026 – Mars 2027</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <span class="admin-pill" id="adminPill">⚡ Admin</span>
+    <button class="btn" id="adminBtn" onclick="handleAdminBtn()">Admin</button>
+  </div>
+</header>
+
+<div class="app-body">
+  <!-- Nav -->
+  <div class="cal-nav">
+    <button class="nav-btn" onclick="navPrev()">← Précédent</button>
+    <div class="cal-nav-center">
+      <div class="cal-title" id="calTitle"></div>
+      <div class="view-toggle">
+        <button class="view-btn" id="vbMonth" onclick="setView('month')">Mois</button>
+        <button class="view-btn active" id="vbWeek" onclick="setView('week')">Semaine</button>
+      </div>
+    </div>
+    <button class="nav-btn" onclick="navNext()">Suivant →</button>
+  </div>
+
+  <!-- Légende -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Places disponibles</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Presque plein</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Complet / plein</div>
+  </div>
+
+  <!-- Calendrier -->
+  <div id="calContainer"></div>
+
+  <!-- Panel jour -->
+  <div id="dayPanel" style="display:none"></div>
+
+  <!-- Admin -->
+  <div class="admin-section" id="adminPanel" style="display:none">
+    <h3>⚡ Panneau Administrateur</h3>
+    <div class="toggle-row">
+      <div class="toggle-wrap" id="priorityToggle" onclick="togglePriority()"></div>
+      <span>Activer la règle de priorité des créneaux</span>
+    </div>
+    <div class="admin-grid">
+      <div class="admin-card">
+        <h4>Ordre créneaux — Matin</h4>
+        <div id="adminMorning"></div>
+      </div>
+      <div class="admin-card">
+        <h4>Ordre créneaux — Après-midi</h4>
+        <div id="adminAfternoon"></div>
+      </div>
+      <div class="admin-card">
+        <h4>Capacité par créneau</h4>
+        <div id="adminCap"></div>
+      </div>
+      <div class="admin-card">
+        <h4>Fermer / Ouvrir un jour</h4>
+        <div class="close-date-wrap">
+          <input type="date" class="field" id="adminCloseDate" min="2026-11-01" max="2027-03-01" style="flex:1">
+          <button class="btn btn-sm" onclick="adminToggleClose()">Fermer / Ouvrir</button>
+        </div>
+        <div class="closed-list" id="adminClosedList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal admin -->
+<div class="modal-bg" id="adminModal">
+  <div class="modal-box">
+    <h3>🔐 Accès Administrateur</h3>
+    <p>Entrez le code admin pour accéder au panneau de gestion.</p>
+    <div class="modal-fields">
+      <div>
+        <label>Code admin</label>
+        <input type="password" class="field" id="adminCodeInput" placeholder="••••" maxlength="6" style="width:100%" onkeydown="if(event.key==='Enter')checkAdmin()">
+        <div class="err-msg" id="adminErr">Code incorrect — réessayez.</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('adminModal')">Annuler</button>
+      <button class="btn btn-primary" onclick="checkAdmin()">Valider</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal déplacement -->
+<div class="modal-bg" id="moveModal">
+  <div class="modal-box">
+    <h3>↔ Déplacer un athlète</h3>
+    <p id="moveInfo"></p>
+    <div class="modal-fields">
+      <div>
+        <label>Nouvelle date</label>
+        <input type="date" class="field" id="moveDate" min="2026-11-01" max="2027-03-01" style="width:100%">
+      </div>
+      <div>
+        <label>Nouveau créneau</label>
+        <select class="field" id="moveSlot" style="width:100%"></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('moveModal')">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmMove()">Déplacer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const START = new Date(2026, 10, 1);
+const END   = new Date(2027, 2, 1);
+
+// Jours fériés FIXES à leurs dates exactes (même si dimanche)
+const HOLIDAYS = {
+  '2026-11-01': 'Toussaint',
+  '2026-11-11': 'Armistice 1918',
+  '2026-12-20': 'Abolition de l\'esclavage',
+  '2026-12-25': 'Noël',
+  '2027-01-01': 'Jour de l\'An',
+};
+
+const DAYS_FR  = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+const DAYS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÉTAT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let S = {
+  view: 'week',
+  currentDate: new Date(2026, 10, 2),
+  selectedDate: null,
+  isAdmin: false,
+  priorityOn: true,
+  morningOrder: ['9h-10h','10h-11h','11h-12h'],
+  afternoonOrder: ['15h-16h','14h-15h','13h-14h'],
+  capacity: { '9h-10h':15,'10h-11h':15,'11h-12h':15,'15h-16h':15,'14h-15h':15,'13h-14h':15 },
+  customClosed: {},
+  data: {},
+  expanded: {},
+  movePending: null,
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STORAGE (partagé)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const SUPABASE_URL = "https://twyqgfberlmmnvijryxl.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3eXFnZmJlcmxtbW52aWpyeXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1NzExOTksImV4cCI6MjA5NzE0NzE5OX0.n0ODXV-QgjFGb4yU7-zowXAIYzh11v3tnHCr4bu5Tfo";
+
+async function save() {
+  for (const date in S.data) {
+    for (const slot in S.data[date]) {
+      for (const athlete of S.data[date][slot]) {
+        await fetch(`${SUPABASE_URL}/rest/v1/inscriptions`, {
+          method: "POST",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+          },
+          body: JSON.stringify({
+            date: date,
+            creneau: slot,
+            nom: athlete.name,
+            role: athlete.role
+          })
+        });
+      }
+    }
+  }
+}
+
+async function load() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/inscriptions?select=*`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`
+    }
+  });
+
+  const rows = await res.json();
+
+  S.data = {};
+
+  rows.forEach(r => {
+    if (!S.data[r.date]) S.data[r.date] = {};
+    if (!S.data[r.date][r.creneau]) S.data[r.date][r.creneau] = [];
+    S.data[r.date][r.creneau].push({
+      name: r.nom,
+      role: r.role
+    });
+  });
+}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// UTILITAIRES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function dk(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function parseDate(k) {
+  const [y,m,d] = k.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+function isClosed(d) {
+  const k = dk(d);
+  if (d.getDay() === 0) return true;  // Dimanche toujours fermé
+  if (HOLIDAYS[k]) return true;        // Jour férié à sa date exacte
+  if (S.customClosed[k]) return true;
+  return false;
+}
+function outOfRange(d) { return d < START || d > END; }
+function holidayName(d) {
+  const k = dk(d);
+  if (d.getDay() === 0) return 'Dimanche';
+  return HOLIDAYS[k] || (S.customClosed[k] ? 'Fermé (admin)' : '');
+}
+function allSlots() { return [...S.morningOrder, ...S.afternoonOrder]; }
+function getSlot(dateK, slot) {
+  if (!S.data[dateK]) S.data[dateK] = {};
+  if (!S.data[dateK][slot]) S.data[dateK][slot] = [];
+  return S.data[dateK][slot];
+}
+function cap(slot) { return S.capacity[slot] || 15; }
+
+function isLocked(dateK, slot) {
+  if (!S.priorityOn || S.isAdmin) return false;
+  const groups = [S.morningOrder, S.afternoonOrder];
+  for (const g of groups) {
+    const idx = g.indexOf(slot);
+    if (idx < 0) continue;
+    for (let i = 0; i < idx; i++) {
+      if (getSlot(dateK, g[i]).length < cap(g[i])) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function slotStatus(dateK, slot) {
+  if (isLocked(dateK, slot)) return 'locked';
+  const n = getSlot(dateK, slot).length;
+  const c = cap(slot);
+  if (n >= c) return 'full';
+  if (n / c >= 0.6) return 'mid';
+  return 'open';
+}
+
+function dayStatus(d) {
+  if (isClosed(d) || outOfRange(d)) return null;
+  const k = dk(d);
+  let total = 0, totalCap = 0;
+  allSlots().forEach(s => {
+    total += getSlot(k, s).length;
+    totalCap += cap(s);
+  });
+  if (total === 0) return 'green';
+  if (total / totalCap >= 0.65) return 'red';
+  return 'orange';
+}
+
+function weekStart(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  dt.setDate(dt.getDate() - (day === 0 ? 6 : day - 1));
+  return dt;
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RENDER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function render() {
+  renderCal();
+  renderDayPanel();
+  renderAdmin();
+}
+
+function renderCal() {
+  document.getElementById('vbMonth').className = 'view-btn' + (S.view==='month' ? ' active' : '');
+  document.getElementById('vbWeek').className  = 'view-btn' + (S.view==='week'  ? ' active' : '');
+  document.getElementById('calContainer').innerHTML = S.view === 'month' ? renderMonth() : renderWeek();
+}
+
+function renderMonth() {
+  const d = S.currentDate;
+  document.getElementById('calTitle').textContent = `${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}`;
+  const first = new Date(d.getFullYear(), d.getMonth(), 1);
+  const offset = (first.getDay() + 6) % 7;
+  const daysCount = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  let h = '<div class="month-grid">';
+  ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].forEach(x => h += `<div class="cal-head">${x}</div>`);
+  for (let i = 0; i < offset; i++) h += '<div class="cal-cell cc-empty"></div>';
+  for (let n = 1; n <= daysCount; n++) {
+    const dt = new Date(d.getFullYear(), d.getMonth(), n);
+    const k = dk(dt);
+    const isHol = !!HOLIDAYS[k];
+    const closed = isClosed(dt);
+    const oor = outOfRange(dt);
+    const sel = S.selectedDate && dk(S.selectedDate) === k;
+    const st = dayStatus(dt);
+    const label = holidayName(dt);
+    let cls = 'cal-cell';
+    if (isHol) cls += ' cc-holiday';
+    else if (closed || oor) cls += ' cc-closed';
+    if (sel && !closed && !oor) cls += ' cc-selected';
+    const click = (!closed && !oor) ? `onclick="selectDay('${k}')"` : '';
+    h += `<div class="${cls}" ${click}>
+      <div class="cc-num">${n}</div>
+      ${label ? `<div class="cc-tag">${esc(label)}</div>` : ''}
+      ${!closed && !oor && st ? `<div class="cc-dot d-${st}"></div>` : ''}
+    </div>`;
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderWeek() {
+  const ws = weekStart(S.currentDate);
+  const we = new Date(ws); we.setDate(ws.getDate()+6);
+  document.getElementById('calTitle').textContent =
+    `${ws.getDate()} ${MONTHS_FR[ws.getMonth()]} — ${we.getDate()} ${MONTHS_FR[we.getMonth()]} ${we.getFullYear()}`;
+  let h = '<div class="week-grid">';
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(ws); dt.setDate(ws.getDate()+i);
+    const k = dk(dt);
+    const closed = isClosed(dt) || outOfRange(dt);
+    const sel = S.selectedDate && dk(S.selectedDate) === k;
+    const isHol = !!HOLIDAYS[k];
+    let cls = 'wk-col' + (sel ? ' wk-selected' : '') + (closed ? ' wk-closed' : '');
+    const click = !closed ? `onclick="selectDay('${k}')"` : '';
+    const holName = holidayName(dt);
+    h += `<div class="${cls}" ${click}>
+      <div class="wk-head">
+        <div class="wk-dayname">${DAYS_FR[dt.getDay()]}</div>
+        <div class="wk-daynum" style="${isHol ? 'color:var(--red)' : ''}">${dt.getDate()}</div>
+        ${holName && closed ? `<div class="wk-holiday">${esc(holName)}</div>` : ''}
+      </div>`;
+    if (closed) {
+      h += `<div class="wk-closed-label">${holName || 'Fermé'}</div>`;
+    } else {
+      h += `<div class="wk-section">Matin</div>`;
+      S.morningOrder.forEach(slot => {
+        const aths = getSlot(k, slot);
+        const c = cap(slot);
+        const pct = Math.min(1, aths.length / c);
+        const locked = isLocked(k, slot) && !S.isAdmin;
+        const color = pct >= 1 ? 'var(--red)' : pct >= .6 ? 'var(--orange)' : 'var(--green)';
+        h += `<div class="wk-slot${locked ? ' wk-locked' : ''}">
+          <div class="wk-slot-time">${slot}</div>
+          <div class="wk-slot-count">${aths.length}/${c}</div>
+          <div class="wk-bar" style="background:var(--border2)"><div style="width:${pct*100}%;height:100%;background:${color};border-radius:2px"></div></div>
+        </div>`;
+      });
+      h += `<div class="wk-section" style="border-top:1px solid var(--border)">Après-midi</div>`;
+      S.afternoonOrder.forEach(slot => {
+        const aths = getSlot(k, slot);
+        const c = cap(slot);
+        const pct = Math.min(1, aths.length / c);
+        const locked = isLocked(k, slot) && !S.isAdmin;
+        const color = pct >= 1 ? 'var(--red)' : pct >= .6 ? 'var(--orange)' : 'var(--green)';
+        h += `<div class="wk-slot${locked ? ' wk-locked' : ''}">
+          <div class="wk-slot-time">${slot}</div>
+          <div class="wk-slot-count">${aths.length}/${c}</div>
+          <div class="wk-bar" style="background:var(--border2)"><div style="width:${pct*100}%;height:100%;background:${color};border-radius:2px"></div></div>
+        </div>`;
+      });
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderDayPanel() {
+  const el = document.getElementById('dayPanel');
+  if (!S.selectedDate) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const d = S.selectedDate;
+  const k = dk(d);
+  const closed = isClosed(d);
+  const dayName = DAYS_FULL[d.getDay()];
+  const dateStr = `${dayName} ${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}`;
+  const holName = holidayName(d);
+
+  let h = `<div class="day-panel">
+    <div class="dp-header">
+      <div>
+        <div class="dp-title">📅 ${dateStr}</div>
+        ${holName ? `<div class="dp-subtitle">🚫 ${esc(holName)}</div>` : ''}
+      </div>
+      <div class="dp-actions">
+        <button class="btn btn-sm" onclick="copyText()">📋 Copier</button>
+        <button class="btn btn-sm btn-wa" onclick="sendWA()">📲 WhatsApp</button>
+      </div>
+    </div>`;
+
+  if (closed) {
+    h += `<div style="padding:28px;text-align:center;color:var(--text3)">Ce jour est fermé — aucune séance.</div>`;
+  } else {
+    h += `<div class="slots-body">`;
+    h += `<div class="slot-group"><div class="slot-group-title">🌅 Matin</div>`;
+    S.morningOrder.forEach(slot => h += renderSlot(k, slot));
+    h += `</div>`;
+    h += `<div class="slot-group"><div class="slot-group-title">🌇 Après-midi</div>`;
+    S.afternoonOrder.forEach(slot => h += renderSlot(k, slot));
+    h += `</div></div>`;
+  }
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+function renderSlot(dateK, slot) {
+  const aths = getSlot(dateK, slot);
+  const c = cap(slot);
+  const st = slotStatus(dateK, slot);
+  const pct = Math.min(1, aths.length / c);
+  const exp = S.expanded[`${dateK}-${slot}`];
+  const labels = { open:'Disponible', mid:'Presque plein', full:'Complet', locked:'🔒 Verrouillé' };
+  const bCls   = { open:'sb-open', mid:'sb-mid', full:'sb-full', locked:'sb-locked' };
+
+  // Find prev slot for locked msg
+  let prevSlot = '';
+  if (st === 'locked') {
+    const g = S.morningOrder.includes(slot) ? S.morningOrder : S.afternoonOrder;
+    const idx = g.indexOf(slot);
+    if (idx > 0) prevSlot = g[idx-1];
+  }
+
+  let h = `<div class="slot-card s-${st}">
+    <div class="slot-header" onclick="toggleSlot('${dateK}','${slot}')">
+      <div class="slot-time">${slot}</div>
+      <div class="slot-count-text">${aths.length} / ${c} inscrits</div>
+      <div class="slot-progress"><div class="slot-progress-fill" style="width:${pct*100}%"></div></div>
+      <span class="slot-badge ${bCls[st]}">${labels[st]}</span>
+      <span class="slot-chevron${exp ? ' open' : ''}">▼</span>
+    </div>`;
+
+  if (st === 'locked' && !S.isAdmin) {
+    h += `<div class="locked-msg">⏳ S'ouvre après remplissage du créneau ${prevSlot}</div>`;
+  }
+
+  if (exp) {
+    h += `<div class="slot-body">
+      <div class="athletes-list">`;
+    if (aths.length === 0) {
+      h += `<div class="empty-slot">Aucun inscrit pour le moment.</div>`;
+    } else {
+      aths.forEach((a, i) => {
+        h += `<div class="ath-row">
+          <span class="ath-num">${i+1}</span>
+          <span class="ath-name">${esc(a.name)}</span>
+          <span class="ath-role-badge ${a.role === 'Encadrant' ? 'role-encadrant' : 'role-athlete'}">${esc(a.role)}</span>
+          <div class="ath-actions">
+            ${S.isAdmin ? `<button class="ath-btn mv" title="Déplacer" onclick="openMove('${dateK}','${slot}',${i})">↔</button>` : ''}
+            <button class="ath-btn del" title="Supprimer" onclick="removeAthlete('${dateK}','${slot}',${i})">✕</button>
+          </div>
+        </div>`;
+      });
+    }
+    h += `</div>`;
+
+    if (st !== 'full' && !(st === 'locked' && !S.isAdmin)) {
+      h += `<div class="add-form">
+        <input class="field" type="text" id="n-${dateK}-${slot}" placeholder="Nom Prénom">
+        <select class="field" id="r-${dateK}-${slot}">
+          <option value="Athlète">Athlète</option>
+          <option value="Encadrant">Encadrant</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="addAthlete('${dateK}','${slot}')">S'inscrire</button>
+      </div>`;
+    } else if (st === 'full') {
+      h += `<div class="full-msg">Créneau complet — plus de places disponibles.</div>`;
+    }
+    h += `</div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+function renderAdmin() {
+  const panel = document.getElementById('adminPanel');
+  if (!S.isAdmin) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  // Toggle
+  const tog = document.getElementById('priorityToggle');
+  tog.className = 'toggle-wrap' + (S.priorityOn ? ' on' : '');
+
+  // Matin order
+  let mh = '';
+  S.morningOrder.forEach((slot, i) => {
+    mh += `<div class="prio-row">
+      <div class="prio-label">${i+1}. ${slot}</div>
+      <div class="prio-btns">
+        <button class="prio-btn" onclick="movePrio('morning',${i},-1)">↑</button>
+        <button class="prio-btn" onclick="movePrio('morning',${i},1)">↓</button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('adminMorning').innerHTML = mh;
+
+  // Après-midi order
+  let ah = '';
+  S.afternoonOrder.forEach((slot, i) => {
+    ah += `<div class="prio-row">
+      <div class="prio-label">${i+1}. ${slot}</div>
+      <div class="prio-btns">
+        <button class="prio-btn" onclick="movePrio('afternoon',${i},-1)">↑</button>
+        <button class="prio-btn" onclick="movePrio('afternoon',${i},1)">↓</button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('adminAfternoon').innerHTML = ah;
+
+  // Capacités
+  let ch = '';
+  allSlots().forEach(slot => {
+    ch += `<div class="cap-row">
+      <div style="flex:1">${slot}</div>
+      <input type="number" class="cap-input" value="${cap(slot)}" min="1" max="100"
+        onchange="updateCap('${slot}',this.value)">
+    </div>`;
+  });
+  document.getElementById('adminCap').innerHTML = ch;
+
+  // Closed list
+  const keys = Object.keys(S.customClosed).filter(k => S.customClosed[k]).sort();
+  document.getElementById('adminClosedList').textContent = keys.length
+    ? 'Jours fermés par admin : ' + keys.join(', ')
+    : 'Aucun jour fermé manuellement.';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ACTIONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function selectDay(k) {
+  const d = parseDate(k);
+  if (isClosed(d) || outOfRange(d)) return;
+  S.selectedDate = d;
+  S.currentDate = d;
+  render();
+  setTimeout(() => document.getElementById('dayPanel').scrollIntoView({ behavior:'smooth', block:'start' }), 60);
+}
+
+function setView(v) { S.view = v; render(); }
+
+function navPrev() {
+  if (S.view === 'month') {
+    S.currentDate = new Date(S.currentDate.getFullYear(), S.currentDate.getMonth()-1, 1);
+  } else {
+    const d = new Date(S.currentDate); d.setDate(d.getDate()-7); S.currentDate = d;
+  }
+  render();
+}
+function navNext() {
+  if (S.view === 'month') {
+    S.currentDate = new Date(S.currentDate.getFullYear(), S.currentDate.getMonth()+1, 1);
+  } else {
+    const d = new Date(S.currentDate); d.setDate(d.getDate()+7); S.currentDate = d;
+  }
+  render();
+}
+
+function toggleSlot(dateK, slot) {
+  const key = `${dateK}-${slot}`;
+  S.expanded[key] = !S.expanded[key];
+  renderDayPanel();
+}
+
+function addAthlete(dateK, slot) {
+  const nameEl = document.getElementById(`n-${dateK}-${slot}`);
+  const roleEl = document.getElementById(`r-${dateK}-${slot}`);
+  if (!nameEl) return;
+  const name = nameEl.value.trim();
+  if (!name) { toast('Entrez un nom et prénom.', 'error'); return; }
+  const c = cap(slot);
+  if (getSlot(dateK, slot).length >= c) { toast('Créneau complet.', 'error'); return; }
+  getSlot(dateK, slot).push({ name, role: roleEl.value });
+  save();
+  toast(`${name} inscrit(e) sur ${slot} !`, 'success');
+  renderDayPanel();
+  renderCal();
+}
+
+function removeAthlete(dateK, slot, idx) {
+  const name = getSlot(dateK, slot)[idx].name;
+  getSlot(dateK, slot).splice(idx, 1);
+  save();
+  toast(`${name} désinscrit(e).`, 'success');
+  renderDayPanel();
+  renderCal();
+}
+
+// ADMIN
+function handleAdminBtn() {
+  if (S.isAdmin) {
+    S.isAdmin = false;
+    document.getElementById('adminPill').style.display = 'none';
+    document.getElementById('adminBtn').textContent = 'Admin';
+    render();
+  } else {
+    document.getElementById('adminCodeInput').value = '';
+    document.getElementById('adminErr').style.display = 'none';
+    document.getElementById('adminModal').classList.add('show');
+    setTimeout(() => document.getElementById('adminCodeInput').focus(), 100);
+  }
+}
+
+function checkAdmin() {
+  if (document.getElementById('adminCodeInput').value === '3103') {
+    S.isAdmin = true;
+    closeModal('adminModal');
+    document.getElementById('adminPill').style.display = 'inline';
+    document.getElementById('adminBtn').textContent = 'Quitter Admin';
+    render();
+  } else {
+    document.getElementById('adminErr').style.display = 'block';
+  }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function togglePriority() {
+  S.priorityOn = !S.priorityOn;
+  save();
+  render();
+}
+
+function movePrio(group, idx, dir) {
+  const arr = group === 'morning' ? S.morningOrder : S.afternoonOrder;
+  const ni = idx + dir;
+  if (ni < 0 || ni >= arr.length) return;
+  [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+  save();
+  render();
+}
+
+function updateCap(slot, val) {
+  S.capacity[slot] = Math.max(1, parseInt(val) || 15);
+  save();
+  renderDayPanel();
+}
+
+function adminToggleClose() {
+  const v = document.getElementById('adminCloseDate').value;
+  if (!v) { toast('Sélectionnez une date.', 'error'); return; }
+  S.customClosed[v] = !S.customClosed[v];
+  if (!S.customClosed[v]) delete S.customClosed[v];
+  save();
+  toast(S.customClosed[v] ? `${v} fermé.` : `${v} rouvert.`, 'success');
+  render();
+}
+
+// MOVE
+function openMove(dateK, slot, idx) {
+  const a = getSlot(dateK, slot)[idx];
+  S.movePending = { dateK, slot, idx, name: a.name, role: a.role };
+  document.getElementById('moveInfo').textContent = `Athlète : ${a.name} (${a.role}) — actuellement sur ${slot} le ${dateK}`;
+  const sel = document.getElementById('moveSlot');
+  sel.innerHTML = allSlots().map(s => `<option value="${s}"${s===slot?' selected':''}>${s}</option>`).join('');
+  document.getElementById('moveDate').value = dateK;
+  document.getElementById('moveModal').classList.add('show');
+}
+
+function confirmMove() {
+  if (!S.movePending) return;
+  const { dateK, slot, idx, name, role } = S.movePending;
+  const nd = document.getElementById('moveDate').value;
+  const ns = document.getElementById('moveSlot').value;
+  if (!nd) { toast('Choisissez une date cible.', 'error'); return; }
+  if (getSlot(nd, ns).length >= cap(ns)) { toast('Créneau cible complet.', 'error'); return; }
+  getSlot(dateK, slot).splice(idx, 1);
+  getSlot(nd, ns).push({ name, role });
+  save();
+  toast(`${name} déplacé vers ${ns} le ${nd}.`, 'success');
+  closeModal('moveModal');
+  S.movePending = null;
+  render();
+}
+
+// WHATSAPP / COPIER
+function buildText() {
+  if (!S.selectedDate) return '';
+  const d = S.selectedDate;
+  const k = dk(d);
+  const dayName = DAYS_FULL[d.getDay()];
+  let t = `📅 Planning Athlétisme\n${dayName} ${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}\n${'─'.repeat(30)}\n\n`;
+  const slots = allSlots();
+  slots.forEach(slot => {
+    const aths = getSlot(k, slot);
+    const c = cap(slot);
+    const st = slotStatus(k, slot);
+    if (st === 'locked') return;
+    const icon = st === 'full' ? '🔴' : st === 'mid' ? '🟡' : '🟢';
+    t += `${icon} ${slot} — ${aths.length}/${c} inscrits\n`;
+    aths.forEach((a, i) => t += `   ${i+1}. ${a.name} (${a.role})\n`);
+    if (aths.length === 0) t += `   (aucun inscrit)\n`;
+    t += '\n';
+  });
+  return t.trim();
+}
+
+function copyText() {
+  const t = buildText();
+  if (!t) return;
+  navigator.clipboard.writeText(t)
+    .then(() => toast('Copié dans le presse-papiers !', 'success'))
+    .catch(() => toast('Erreur de copie.', 'error'));
+}
+
+function sendWA() {
+  const t = buildText();
+  if (!t) return;
+  window.open('https://wa.me/?text=' + encodeURIComponent(t), '_blank');
+}
+
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (type ? ` t-${type}` : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = 'toast', 2800);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INIT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(async () => {
+  await load();
+  // Sélectionner le premier jour ouvert
+  let d = new Date(2026, 10, 2);
+  while ((isClosed(d) || outOfRange(d)) && d < END) d.setDate(d.getDate()+1);
+  S.selectedDate = d;
+  S.currentDate = d;
+  S.expanded[`${dk(d)}-${S.morningOrder[0]}`] = true;
+  render();
+})();
+</script>
+</body>
+</html>
