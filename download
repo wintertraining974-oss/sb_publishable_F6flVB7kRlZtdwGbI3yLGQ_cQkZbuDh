@@ -1,0 +1,875 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { supabase } from '../lib/supabase'
+import {
+  HOLIDAYS, DAYS_FR, DAYS_FULL, MONTHS_FR,
+  DEFAULT_MORNING_ORDER, DEFAULT_AFTERNOON_ORDER,
+  DEFAULT_CAPACITY, ADMIN_CODE
+} from '../lib/constants'
+
+// ─── Utilitaires date ─────────────────────────────────────────────
+function dk(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+function parseDate(k) {
+  const [y,m,d] = k.split('-').map(Number)
+  return new Date(y, m-1, d)
+}
+function weekStart(d) {
+  const dt = new Date(d)
+  const day = dt.getDay()
+  dt.setDate(dt.getDate() - (day === 0 ? 6 : day - 1))
+  return dt
+}
+const START = new Date(2026, 10, 1)
+const END   = new Date(2027, 2, 1)
+
+function isClosed(d, customClosed) {
+  const k = dk(d)
+  if (d.getDay() === 0) return true
+  if (HOLIDAYS[k]) return true
+  if (customClosed && customClosed[k]) return true
+  return false
+}
+function outOfRange(d) { return d < START || d > END }
+function holidayName(d, customClosed) {
+  const k = dk(d)
+  if (d.getDay() === 0) return 'Dimanche'
+  if (HOLIDAYS[k]) return HOLIDAYS[k]
+  if (customClosed && customClosed[k]) return 'Fermé (admin)'
+  return ''
+}
+function allSlots(mo, ao) { return [...mo, ...ao] }
+
+export default function Home() {
+  // ─── État ──────────────────────────────────────────────────────
+  const [view, setView] = useState('week')
+  const [currentDate, setCurrentDate] = useState(new Date(2026, 10, 3))
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminModalOpen, setAdminModalOpen] = useState(false)
+  const [adminCode, setAdminCode] = useState('')
+  const [adminErr, setAdminErr] = useState(false)
+  const [moveModal, setMoveModal] = useState(null) // {dateK, slot, idx, name, role}
+  const [moveDateTarget, setMoveDateTarget] = useState('')
+  const [moveSlotTarget, setMoveSlotTarget] = useState('')
+  const [toast, setToast] = useState({ msg:'', type:'', show:false })
+  const [expanded, setExpanded] = useState({})
+  const [loading, setLoading] = useState(true)
+
+  // Config (depuis Supabase)
+  const [priorityOn, setPriorityOn] = useState(true)
+  const [morningOrder, setMorningOrder] = useState(DEFAULT_MORNING_ORDER)
+  const [afternoonOrder, setAfternoonOrder] = useState(DEFAULT_AFTERNOON_ORDER)
+  const [capacity, setCapacity] = useState(DEFAULT_CAPACITY)
+  const [customClosed, setCustomClosed] = useState({})
+
+  // Inscriptions (depuis Supabase) : { '2026-11-03': { '9h-10h': [{id,name,role}] } }
+  const [data, setData] = useState({})
+
+  const toastTimer = useRef(null)
+
+  // ─── Toast ─────────────────────────────────────────────────────
+  function showToast(msg, type='') {
+    clearTimeout(toastTimer.current)
+    setToast({ msg, type, show: true })
+    toastTimer.current = setTimeout(() => setToast(t => ({...t, show:false})), 2800)
+  }
+
+  // ─── Chargement initial Supabase ───────────────────────────────
+  useEffect(() => {
+    async function init() {
+      setLoading(true)
+      // Config
+      const { data: cfgRows } = await supabase.from('config').select('data').eq('id','global').single()
+      if (cfgRows?.data) {
+        const c = cfgRows.data
+        if (c.priorityOn !== undefined) setPriorityOn(c.priorityOn)
+        if (c.morningOrder) setMorningOrder(c.morningOrder)
+        if (c.afternoonOrder) setAfternoonOrder(c.afternoonOrder)
+        if (c.capacity) setCapacity(c.capacity)
+        if (c.customClosed) setCustomClosed(c.customClosed)
+      }
+      // Inscriptions
+      const { data: rows } = await supabase.from('inscriptions').select('*').order('created_at')
+      if (rows) buildData(rows)
+      setLoading(false)
+    }
+    init()
+  }, [])
+
+  // ─── Realtime ──────────────────────────────────────────────────
+  useEffect(() => {
+    const ch1 = supabase.channel('inscriptions-rt')
+      .on('postgres_changes', { event:'*', schema:'public', table:'inscriptions' }, payload => {
+        supabase.from('inscriptions').select('*').order('created_at').then(({ data: rows }) => {
+          if (rows) buildData(rows)
+        })
+      })
+      .subscribe()
+    const ch2 = supabase.channel('config-rt')
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'config' }, payload => {
+        const c = payload.new.data
+        if (c) {
+          if (c.priorityOn !== undefined) setPriorityOn(c.priorityOn)
+          if (c.morningOrder) setMorningOrder(c.morningOrder)
+          if (c.afternoonOrder) setAfternoonOrder(c.afternoonOrder)
+          if (c.capacity) setCapacity(c.capacity)
+          if (c.customClosed) setCustomClosed(c.customClosed)
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2) }
+  }, [])
+
+  function buildData(rows) {
+    const d = {}
+    rows.forEach(r => {
+      if (!d[r.date_key]) d[r.date_key] = {}
+      if (!d[r.date_key][r.slot]) d[r.date_key][r.slot] = []
+      d[r.date_key][r.slot].push({ id: r.id, name: r.name, role: r.role })
+    })
+    setData(d)
+  }
+
+  // ─── Helpers data ──────────────────────────────────────────────
+  function getSlot(dateK, slot) {
+    return data[dateK]?.[slot] || []
+  }
+  function getCap(slot) { return capacity[slot] || 15 }
+
+  function isLocked(dateK, slot) {
+    if (!priorityOn || isAdmin) return false
+    const groups = [morningOrder, afternoonOrder]
+    for (const g of groups) {
+      const idx = g.indexOf(slot)
+      if (idx < 0) continue
+      for (let i = 0; i < idx; i++) {
+        if (getSlot(dateK, g[i]).length < getCap(g[i])) return true
+      }
+      return false
+    }
+    return false
+  }
+
+  function slotStatus(dateK, slot) {
+    if (isLocked(dateK, slot)) return 'locked'
+    const n = getSlot(dateK, slot).length
+    const c = getCap(slot)
+    if (n >= c) return 'full'
+    if (n / c >= 0.6) return 'mid'
+    return 'open'
+  }
+
+  function dayDotColor(d) {
+    if (isClosed(d, customClosed) || outOfRange(d)) return null
+    const k = dk(d)
+    let total = 0, totalCap = 0
+    allSlots(morningOrder, afternoonOrder).forEach(s => {
+      total += getSlot(k, s).length
+      totalCap += getCap(s)
+    })
+    if (total === 0) return 'green'
+    if (total / totalCap >= 0.65) return 'red'
+    return 'orange'
+  }
+
+  // ─── Sauvegarde config ─────────────────────────────────────────
+  async function saveConfig(patch) {
+    const newCfg = {
+      priorityOn,
+      morningOrder,
+      afternoonOrder,
+      capacity,
+      customClosed,
+      ...patch,
+    }
+    await supabase.from('config').update({ data: newCfg, updated_at: new Date().toISOString() }).eq('id','global')
+  }
+
+  // ─── Actions inscriptions ──────────────────────────────────────
+  async function addAthlete(dateK, slot, name, role) {
+    if (!name.trim()) { showToast('Entrez un nom et prénom.', 'error'); return }
+    if (getSlot(dateK, slot).length >= getCap(slot)) { showToast('Créneau complet.', 'error'); return }
+    const { error } = await supabase.from('inscriptions').insert({ date_key: dateK, slot, name: name.trim(), role })
+    if (error) showToast('Erreur lors de l\'inscription.', 'error')
+    else showToast(`${name.trim()} inscrit(e) sur ${slot} !`, 'success')
+  }
+
+  async function removeAthlete(id, name) {
+    const { error } = await supabase.from('inscriptions').delete().eq('id', id)
+    if (error) showToast('Erreur suppression.', 'error')
+    else showToast(`${name} désinscrit(e).`, 'success')
+  }
+
+  async function moveAthlete() {
+    if (!moveModal) return
+    const { dateK, slot, id, name, role } = moveModal
+    if (!moveDateTarget) { showToast('Choisissez une date cible.', 'error'); return }
+    const targetSlot = moveSlotTarget || slot
+    if (getSlot(moveDateTarget, targetSlot).length >= getCap(targetSlot)) {
+      showToast('Créneau cible complet.', 'error'); return
+    }
+    await supabase.from('inscriptions').delete().eq('id', id)
+    await supabase.from('inscriptions').insert({ date_key: moveDateTarget, slot: targetSlot, name, role })
+    showToast(`${name} déplacé(e) vers ${targetSlot} le ${moveDateTarget}.`, 'success')
+    setMoveModal(null)
+  }
+
+  // ─── Admin ─────────────────────────────────────────────────────
+  function checkAdmin() {
+    if (adminCode === ADMIN_CODE) {
+      setIsAdmin(true)
+      setAdminModalOpen(false)
+      setAdminCode('')
+      setAdminErr(false)
+    } else {
+      setAdminErr(true)
+    }
+  }
+
+  async function togglePriority() {
+    const next = !priorityOn
+    setPriorityOn(next)
+    await saveConfig({ priorityOn: next })
+  }
+
+  async function movePrio(group, idx, dir) {
+    const arr = group === 'morning' ? [...morningOrder] : [...afternoonOrder]
+    const ni = idx + dir
+    if (ni < 0 || ni >= arr.length) return;
+    [arr[idx], arr[ni]] = [arr[ni], arr[idx]]
+    if (group === 'morning') { setMorningOrder(arr); await saveConfig({ morningOrder: arr }) }
+    else { setAfternoonOrder(arr); await saveConfig({ afternoonOrder: arr }) }
+  }
+
+  async function updateCap(slot, val) {
+    const newCap = { ...capacity, [slot]: Math.max(1, parseInt(val) || 15) }
+    setCapacity(newCap)
+    await saveConfig({ capacity: newCap })
+  }
+
+  async function adminToggleClose(dateStr) {
+    if (!dateStr) { showToast('Sélectionnez une date.', 'error'); return }
+    const next = { ...customClosed }
+    if (next[dateStr]) delete next[dateStr]
+    else next[dateStr] = true
+    setCustomClosed(next)
+    await saveConfig({ customClosed: next })
+    showToast(next[dateStr] ? `${dateStr} fermé.` : `${dateStr} rouvert.`, 'success')
+  }
+
+  // ─── Copier / WhatsApp ─────────────────────────────────────────
+  function buildText() {
+    if (!selectedDate) return ''
+    const d = selectedDate
+    const k = dk(d)
+    const dayName = DAYS_FULL[d.getDay()]
+    let t = `📅 Planning Athlétisme\n${dayName} ${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}\n${'─'.repeat(32)}\n\n`
+    allSlots(morningOrder, afternoonOrder).forEach(slot => {
+      const aths = getSlot(k, slot)
+      const c = getCap(slot)
+      const st = slotStatus(k, slot)
+      if (st === 'locked') return
+      const icon = st === 'full' ? '🔴' : st === 'mid' ? '🟡' : '🟢'
+      t += `${icon} ${slot} — ${aths.length}/${c}\n`
+      aths.forEach((a, i) => t += `   ${i+1}. ${a.name} (${a.role})\n`)
+      if (!aths.length) t += `   (aucun inscrit)\n`
+      t += '\n'
+    })
+    return t.trim()
+  }
+
+  function copyText() {
+    navigator.clipboard.writeText(buildText())
+      .then(() => showToast('Copié !', 'success'))
+      .catch(() => showToast('Erreur copie.', 'error'))
+  }
+
+  function sendWA() {
+    window.open('https://wa.me/?text=' + encodeURIComponent(buildText()), '_blank')
+  }
+
+  // ─── Navigation ────────────────────────────────────────────────
+  function navPrev() {
+    if (view === 'month') setCurrentDate(d => new Date(d.getFullYear(), d.getMonth()-1, 1))
+    else setCurrentDate(d => { const n=new Date(d); n.setDate(n.getDate()-7); return n })
+  }
+  function navNext() {
+    if (view === 'month') setCurrentDate(d => new Date(d.getFullYear(), d.getMonth()+1, 1))
+    else setCurrentDate(d => { const n=new Date(d); n.setDate(n.getDate()+7); return n })
+  }
+
+  function selectDay(k) {
+    const d = parseDate(k)
+    if (isClosed(d, customClosed) || outOfRange(d)) return
+    setSelectedDate(d)
+    setCurrentDate(d)
+    setTimeout(() => document.getElementById('day-panel')?.scrollIntoView({ behavior:'smooth', block:'start' }), 60)
+  }
+
+  // ─── Titre calendrier ──────────────────────────────────────────
+  function calTitle() {
+    if (view === 'month') return `${MONTHS_FR[currentDate.getMonth()]} ${currentDate.getFullYear()}`
+    const ws = weekStart(currentDate)
+    const we = new Date(ws); we.setDate(ws.getDate()+6)
+    return `${ws.getDate()} ${MONTHS_FR[ws.getMonth()]} — ${we.getDate()} ${MONTHS_FR[we.getMonth()]} ${we.getFullYear()}`
+  }
+
+  // ─── RENDER ────────────────────────────────────────────────────
+  if (loading) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:16 }}>
+      <div style={{ width:40, height:40, border:'3px solid #e5e7eb', borderTopColor:'#1a56db', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div>
+      <p style={{ color:'#6b7280', fontSize:'.9rem' }}>Chargement du planning…</p>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+
+  return (
+    <>
+      <style>{css}</style>
+
+      {/* HEADER */}
+      <header className="header">
+        <div className="brand">
+          <div className="brand-icon">🏃</div>
+          <div>
+            <h1 className="brand-title">Planning Athlétisme</h1>
+            <p className="brand-sub">Nov 2026 – Mars 2027 · La Réunion</p>
+          </div>
+        </div>
+        <div className="header-actions">
+          {isAdmin && <span className="admin-pill">⚡ Admin</span>}
+          <button className="btn" onClick={() => {
+            if (isAdmin) { setIsAdmin(false) }
+            else { setAdminModalOpen(true); setAdminCode(''); setAdminErr(false) }
+          }}>
+            {isAdmin ? 'Quitter Admin' : 'Admin'}
+          </button>
+        </div>
+      </header>
+
+      <div className="app-body">
+        {/* NAV CALENDRIER */}
+        <div className="cal-nav">
+          <button className="nav-btn" onClick={navPrev}>← Précédent</button>
+          <div className="cal-nav-center">
+            <div className="cal-title">{calTitle()}</div>
+            <div className="view-toggle">
+              <button className={`view-btn${view==='month'?' active':''}`} onClick={() => setView('month')}>Mois</button>
+              <button className={`view-btn${view==='week'?' active':''}`} onClick={() => setView('week')}>Semaine</button>
+            </div>
+          </div>
+          <button className="nav-btn" onClick={navNext}>Suivant →</button>
+        </div>
+
+        {/* Légende */}
+        <div className="legend">
+          <div className="legend-item"><div className="leg-dot" style={{background:'var(--green)'}}></div> Places libres</div>
+          <div className="legend-item"><div className="leg-dot" style={{background:'var(--orange)'}}></div> Presque plein</div>
+          <div className="legend-item"><div className="leg-dot" style={{background:'var(--red)'}}></div> Complet</div>
+        </div>
+
+        {/* CALENDRIER */}
+        {view === 'month' ? <MonthView /> : <WeekView />}
+
+        {/* PANEL JOUR */}
+        {selectedDate && <DayPanel />}
+
+        {/* ADMIN */}
+        {isAdmin && <AdminPanel />}
+      </div>
+
+      {/* MODALS */}
+      {adminModalOpen && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setAdminModalOpen(false)}>
+          <div className="modal-box">
+            <h3 style={{marginBottom:8}}>🔐 Accès Administrateur</h3>
+            <p style={{fontSize:'.83rem',color:'var(--text3)',marginBottom:16}}>Entrez le code admin pour continuer.</p>
+            <input
+              className="field" type="password" placeholder="Code admin" maxLength={6}
+              value={adminCode}
+              onChange={e => { setAdminCode(e.target.value); setAdminErr(false) }}
+              onKeyDown={e => e.key==='Enter' && checkAdmin()}
+              autoFocus style={{width:'100%'}}
+            />
+            {adminErr && <p style={{color:'var(--red)',fontSize:'.78rem',marginTop:6}}>Code incorrect — réessayez.</p>}
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setAdminModalOpen(false)}>Annuler</button>
+              <button className="btn btn-primary" onClick={checkAdmin}>Valider</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {moveModal && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setMoveModal(null)}>
+          <div className="modal-box">
+            <h3 style={{marginBottom:8}}>↔ Déplacer un athlète</h3>
+            <p style={{fontSize:'.83rem',color:'var(--text3)',marginBottom:16}}>
+              {moveModal.name} ({moveModal.role}) — actuellement sur {moveModal.slot} le {moveModal.dateK}
+            </p>
+            <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:16}}>
+              <div>
+                <label style={{fontSize:'.78rem',color:'var(--text3)',display:'block',marginBottom:4}}>Nouvelle date</label>
+                <input type="date" className="field" value={moveDateTarget} min="2026-11-01" max="2027-03-01"
+                  onChange={e => setMoveDateTarget(e.target.value)} style={{width:'100%'}} />
+              </div>
+              <div>
+                <label style={{fontSize:'.78rem',color:'var(--text3)',display:'block',marginBottom:4}}>Nouveau créneau</label>
+                <select className="field" value={moveSlotTarget || moveModal.slot}
+                  onChange={e => setMoveSlotTarget(e.target.value)} style={{width:'100%'}}>
+                  {allSlots(morningOrder, afternoonOrder).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setMoveModal(null)}>Annuler</button>
+              <button className="btn btn-primary" onClick={moveAthlete}>Déplacer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST */}
+      <div className={`toast${toast.show?' show':''} ${toast.type==='success'?'t-success':toast.type==='error'?'t-error':''}`}>
+        {toast.msg}
+      </div>
+
+      {/* ─── COMPOSANTS INLINE ─── */}
+      {/* (définis comme fonctions imbriquées pour accéder au state) */}
+    </>
+  )
+
+  // ── Vue Mois ────────────────────────────────────────────────────
+  function MonthView() {
+    const d = currentDate
+    const first = new Date(d.getFullYear(), d.getMonth(), 1)
+    const offset = (first.getDay() + 6) % 7
+    const daysCount = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate()
+    const cells = []
+    for (let i = 0; i < offset; i++) cells.push(<div key={`e${i}`} className="cal-cell cc-empty" />)
+    for (let n = 1; n <= daysCount; n++) {
+      const dt = new Date(d.getFullYear(), d.getMonth(), n)
+      const k = dk(dt)
+      const isHol = !!HOLIDAYS[k]
+      const closed = isClosed(dt, customClosed)
+      const oor = outOfRange(dt)
+      const sel = selectedDate && dk(selectedDate) === k
+      const dotColor = dayDotColor(dt)
+      const lbl = holidayName(dt, customClosed)
+      let cls = 'cal-cell'
+      if (isHol) cls += ' cc-holiday'
+      else if (closed || oor) cls += ' cc-closed'
+      if (sel && !closed && !oor) cls += ' cc-selected'
+      cells.push(
+        <div key={k} className={cls} onClick={() => (!closed && !oor) && selectDay(k)}>
+          <div className="cc-num">{n}</div>
+          {lbl && <div className="cc-tag">{lbl}</div>}
+          {!closed && !oor && dotColor && <div className={`cc-dot d-${dotColor}`} />}
+        </div>
+      )
+    }
+    return (
+      <div className="month-grid">
+        {['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(x => <div key={x} className="cal-head">{x}</div>)}
+        {cells}
+      </div>
+    )
+  }
+
+  // ── Vue Semaine ─────────────────────────────────────────────────
+  function WeekView() {
+    const ws = weekStart(currentDate)
+    const cols = []
+    for (let i = 0; i < 7; i++) {
+      const dt = new Date(ws); dt.setDate(ws.getDate()+i)
+      const k = dk(dt)
+      const closed = isClosed(dt, customClosed) || outOfRange(dt)
+      const isHol = !!HOLIDAYS[k]
+      const sel = selectedDate && dk(selectedDate) === k
+      const holName = holidayName(dt, customClosed)
+      cols.push(
+        <div key={k} className={`wk-col${sel?' wk-selected':''}${closed?' wk-closed':''}`}
+          onClick={() => !closed && selectDay(k)}>
+          <div className="wk-head">
+            <div className="wk-dayname">{DAYS_FR[dt.getDay()]}</div>
+            <div className="wk-daynum" style={isHol ? {color:'var(--red)'} : {}}>{dt.getDate()}</div>
+            {holName && closed && <div className="wk-holiday">{holName}</div>}
+          </div>
+          {closed ? (
+            <div className="wk-closed-label">{holName || 'Fermé'}</div>
+          ) : (
+            <>
+              <div className="wk-section">Matin</div>
+              {morningOrder.map(slot => <WkSlotMini key={slot} dateK={k} slot={slot} />)}
+              <div className="wk-section" style={{borderTop:'1px solid var(--border)'}}>Après-midi</div>
+              {afternoonOrder.map(slot => <WkSlotMini key={slot} dateK={k} slot={slot} />)}
+            </>
+          )}
+        </div>
+      )
+    }
+    return <div className="week-grid">{cols}</div>
+  }
+
+  function WkSlotMini({ dateK, slot }) {
+    const aths = getSlot(dateK, slot)
+    const c = getCap(slot)
+    const pct = Math.min(1, aths.length / c)
+    const locked = isLocked(dateK, slot) && !isAdmin
+    const color = pct >= 1 ? 'var(--red)' : pct >= .6 ? 'var(--orange)' : 'var(--green)'
+    return (
+      <div className={`wk-slot${locked?' wk-locked':''}`}>
+        <div className="wk-slot-time">{slot}</div>
+        <div className="wk-slot-count">{aths.length}/{c}</div>
+        <div style={{height:3,borderRadius:2,background:'var(--border2)',marginTop:3}}>
+          <div style={{width:`${pct*100}%`,height:'100%',background:color,borderRadius:2}} />
+        </div>
+      </div>
+    )
+  }
+
+  // ── Panel jour ──────────────────────────────────────────────────
+  function DayPanel() {
+    const d = selectedDate
+    const k = dk(d)
+    const closed = isClosed(d, customClosed)
+    const dayName = DAYS_FULL[d.getDay()]
+    const holName = holidayName(d, customClosed)
+    const dateStr = `${dayName} ${d.getDate()} ${MONTHS_FR[d.getMonth()]} ${d.getFullYear()}`
+    return (
+      <div className="day-panel" id="day-panel">
+        <div className="dp-header">
+          <div>
+            <div className="dp-title">📅 {dateStr}</div>
+            {holName && <div className="dp-subtitle">🚫 {holName}</div>}
+          </div>
+          <div className="dp-actions">
+            <button className="btn btn-sm" onClick={copyText}>📋 Copier</button>
+            <button className="btn btn-sm btn-wa" onClick={sendWA}>📲 WhatsApp</button>
+          </div>
+        </div>
+        {closed ? (
+          <div style={{padding:28,textAlign:'center',color:'var(--text3)'}}>Ce jour est fermé — aucune séance.</div>
+        ) : (
+          <div className="slots-body">
+            <SlotGroup title="🌅 Matin" slots={morningOrder} dateK={k} />
+            <SlotGroup title="🌇 Après-midi" slots={afternoonOrder} dateK={k} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function SlotGroup({ title, slots, dateK }) {
+    return (
+      <div className="slot-group">
+        <div className="slot-group-title">{title}</div>
+        {slots.map(slot => <SlotCard key={slot} dateK={dateK} slot={slot} />)}
+      </div>
+    )
+  }
+
+  function SlotCard({ dateK, slot }) {
+    const aths = getSlot(dateK, slot)
+    const c = getCap(slot)
+    const st = slotStatus(dateK, slot)
+    const pct = Math.min(1, aths.length / c)
+    const expKey = `${dateK}-${slot}`
+    const isExp = expanded[expKey]
+
+    const labels = { open:'Disponible', mid:'Presque plein', full:'Complet', locked:'🔒 Verrouillé' }
+    const bCls   = { open:'sb-open', mid:'sb-mid', full:'sb-full', locked:'sb-locked' }
+
+    const g = morningOrder.includes(slot) ? morningOrder : afternoonOrder
+    const prevSlot = st === 'locked' ? g[g.indexOf(slot)-1] : ''
+
+    const [nameVal, setNameVal] = useState('')
+    const [roleVal, setRoleVal] = useState('Athlète')
+
+    return (
+      <div className={`slot-card s-${st}`}>
+        <div className="slot-header" onClick={() => setExpanded(e => ({...e, [expKey]: !e[expKey]}))}>
+          <div className="slot-time">{slot}</div>
+          <div className="slot-count-text">{aths.length} / {c} inscrits</div>
+          <div className="slot-progress">
+            <div className="slot-progress-fill" style={{width:`${pct*100}%`}} />
+          </div>
+          <span className={`slot-badge ${bCls[st]}`}>{labels[st]}</span>
+          <span className={`slot-chevron${isExp?' open':''}`}>▼</span>
+        </div>
+
+        {st === 'locked' && !isAdmin && (
+          <div className="locked-msg">⏳ S'ouvre après remplissage du créneau {prevSlot}</div>
+        )}
+
+        {isExp && (
+          <div className="slot-body">
+            <div className="athletes-list">
+              {aths.length === 0 ? (
+                <div className="empty-slot">Aucun inscrit pour le moment.</div>
+              ) : aths.map((a, i) => (
+                <div key={a.id} className="ath-row">
+                  <span className="ath-num">{i+1}</span>
+                  <span className="ath-name">{a.name}</span>
+                  <span className={`ath-role-badge ${a.role==='Encadrant'?'role-encadrant':'role-athlete'}`}>{a.role}</span>
+                  <div className="ath-actions">
+                    {isAdmin && (
+                      <button className="ath-btn mv" title="Déplacer" onClick={() => {
+                        setMoveModal({ dateK, slot, id: a.id, name: a.name, role: a.role })
+                        setMoveDateTarget(dateK)
+                        setMoveSlotTarget(slot)
+                      }}>↔</button>
+                    )}
+                    <button className="ath-btn del" title="Supprimer" onClick={() => removeAthlete(a.id, a.name)}>✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {st === 'full' ? (
+              <div className="full-msg">Créneau complet — plus de places.</div>
+            ) : !(st === 'locked' && !isAdmin) && (
+              <div className="add-form">
+                <input className="field" type="text" placeholder="Nom Prénom"
+                  value={nameVal} onChange={e => setNameVal(e.target.value)}
+                  onKeyDown={e => e.key==='Enter' && addAthlete(dateK, slot, nameVal, roleVal).then(() => setNameVal(''))} />
+                <select className="field" value={roleVal} onChange={e => setRoleVal(e.target.value)}>
+                  <option value="Athlète">Athlète</option>
+                  <option value="Encadrant">Encadrant</option>
+                </select>
+                <button className="btn btn-sm btn-primary"
+                  onClick={() => addAthlete(dateK, slot, nameVal, roleVal).then(() => setNameVal(''))}>
+                  S'inscrire
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── Admin Panel ─────────────────────────────────────────────────
+  function AdminPanel() {
+    const [closeDate, setCloseDate] = useState('')
+    const closedKeys = Object.keys(customClosed).filter(k => customClosed[k]).sort()
+    return (
+      <div className="admin-section">
+        <h3 style={{fontSize:'.88rem',fontWeight:700,color:'var(--accent)',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
+          ⚡ Panneau Administrateur
+        </h3>
+        <div className="toggle-row">
+          <div className={`toggle-wrap${priorityOn?' on':''}`} onClick={togglePriority} />
+          <span style={{fontSize:'.85rem'}}>Activer la règle de priorité des créneaux</span>
+        </div>
+        <div className="admin-grid">
+          <div className="admin-card">
+            <div className="admin-card-title">Ordre créneaux — Matin</div>
+            {morningOrder.map((slot, i) => (
+              <div key={slot} className="prio-row">
+                <div style={{flex:1,fontSize:'.84rem'}}>{i+1}. {slot}</div>
+                <div style={{display:'flex',gap:3}}>
+                  <button className="prio-btn" onClick={() => movePrio('morning',i,-1)}>↑</button>
+                  <button className="prio-btn" onClick={() => movePrio('morning',i,1)}>↓</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="admin-card">
+            <div className="admin-card-title">Ordre créneaux — Après-midi</div>
+            {afternoonOrder.map((slot, i) => (
+              <div key={slot} className="prio-row">
+                <div style={{flex:1,fontSize:'.84rem'}}>{i+1}. {slot}</div>
+                <div style={{display:'flex',gap:3}}>
+                  <button className="prio-btn" onClick={() => movePrio('afternoon',i,-1)}>↑</button>
+                  <button className="prio-btn" onClick={() => movePrio('afternoon',i,1)}>↓</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="admin-card">
+            <div className="admin-card-title">Capacité par créneau</div>
+            {allSlots(morningOrder, afternoonOrder).map(slot => (
+              <div key={slot} className="cap-row">
+                <div style={{flex:1,fontSize:'.84rem'}}>{slot}</div>
+                <input type="number" className="cap-input" defaultValue={getCap(slot)}
+                  min={1} max={100} onBlur={e => updateCap(slot, e.target.value)} />
+              </div>
+            ))}
+          </div>
+          <div className="admin-card">
+            <div className="admin-card-title">Fermer / Ouvrir un jour</div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+              <input type="date" className="field" value={closeDate}
+                min="2026-11-01" max="2027-03-01"
+                onChange={e => setCloseDate(e.target.value)} style={{flex:1}} />
+              <button className="btn btn-sm" onClick={() => adminToggleClose(closeDate)}>Fermer / Ouvrir</button>
+            </div>
+            <div style={{fontSize:'.75rem',color:'var(--text3)'}}>
+              {closedKeys.length ? 'Fermés : ' + closedKeys.join(', ') : 'Aucun jour fermé manuellement.'}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+}
+
+// ─── CSS en JS ────────────────────────────────────────────────────
+const css = `
+.header {
+  background: #fff; border-bottom: 1px solid var(--border);
+  padding: 0 24px; display: flex; align-items: center;
+  justify-content: space-between; height: 60px;
+  position: sticky; top: 0; z-index: 50;
+  box-shadow: var(--shadow-sm);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-icon { width: 36px; height: 36px; background: var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; flex-shrink: 0; }
+.brand-title { font-size: .95rem; font-weight: 700; }
+.brand-sub { font-size: .72rem; color: var(--text3); }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+.admin-pill { background: var(--accent); color: white; font-size: .72rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+.btn { border: 1.5px solid var(--border2); background: white; color: var(--text2); padding: 7px 14px; border-radius: var(--radius-sm); font-size: .82rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-primary:hover { background: #1447bf; border-color: #1447bf; color: white; }
+.btn-sm { padding: 5px 10px; font-size: .78rem; }
+.btn-wa { background: #25d366; border-color: #25d366; color: white; }
+.btn-wa:hover { background: #1ebe5c; border-color: #1ebe5c; color: white; }
+.app-body { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+.cal-nav-center { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.cal-title { font-size: 1.1rem; font-weight: 700; min-width: 220px; text-align: center; }
+.view-toggle { display: flex; border: 1.5px solid var(--border2); border-radius: var(--radius-sm); overflow: hidden; }
+.view-btn { padding: 6px 14px; background: white; border: none; color: var(--text3); cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .15s; }
+.view-btn.active { background: var(--accent); color: white; }
+.nav-btn { background: white; border: 1.5px solid var(--border2); color: var(--text2); padding: 7px 16px; border-radius: var(--radius-sm); font-size: .82rem; font-weight: 600; cursor: pointer; transition: all .15s; }
+.nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: .75rem; color: var(--text3); }
+.leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Calendrier mois */
+.month-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow-sm); }
+.cal-head { text-align: center; font-size: .7rem; font-weight: 700; color: var(--text3); padding: 6px 2px 10px; text-transform: uppercase; letter-spacing: .5px; }
+.cal-cell { min-height: 56px; border-radius: var(--radius-sm); border: 1.5px solid transparent; display: flex; flex-direction: column; align-items: center; padding: 6px 4px; cursor: pointer; transition: all .12s; gap: 2px; }
+.cal-cell:hover:not(.cc-closed):not(.cc-empty):not(.cc-holiday) { background: var(--accent-light); border-color: var(--accent); }
+.cal-cell.cc-selected { background: var(--accent-light); border-color: var(--accent); }
+.cal-cell.cc-closed, .cal-cell.cc-holiday { background: #f9fafb; opacity: .55; cursor: not-allowed; }
+.cal-cell.cc-empty { cursor: default; }
+.cc-num { font-size: .85rem; font-weight: 700; }
+.cc-holiday .cc-num { color: var(--red); }
+.cc-tag { font-size: .55rem; color: var(--text3); text-align: center; line-height: 1.2; }
+.cc-holiday .cc-tag { color: var(--red); opacity: .8; }
+.cc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.cc-dot.d-green { background: var(--green); }
+.cc-dot.d-orange { background: var(--orange); }
+.cc-dot.d-red { background: var(--red); }
+
+/* Semaine */
+.week-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; }
+.wk-col { background: white; border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color .12s; }
+.wk-col:hover:not(.wk-closed) { border-color: var(--accent); }
+.wk-col.wk-selected { border-color: var(--accent); box-shadow: 0 0 0 3px #1a56db22; }
+.wk-col.wk-closed { opacity: .45; cursor: not-allowed; }
+.wk-head { padding: 10px 6px; border-bottom: 1px solid var(--border); text-align: center; }
+.wk-dayname { font-size: .65rem; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+.wk-daynum { font-size: 1rem; font-weight: 700; }
+.wk-holiday { font-size: .55rem; color: var(--red); margin-top: 2px; }
+.wk-section { font-size: .6rem; font-weight: 700; color: var(--text3); text-align: center; padding: 4px; background: var(--bg); text-transform: uppercase; letter-spacing: .5px; }
+.wk-slot { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+.wk-slot-time { font-size: .65rem; font-weight: 700; }
+.wk-slot-count { font-size: .6rem; color: var(--text3); }
+.wk-slot.wk-locked { opacity: .4; }
+.wk-closed-label { padding: 12px 6px; font-size: .62rem; color: var(--text3); text-align: center; }
+
+/* Panel jour */
+.day-panel { margin-top: 20px; background: white; border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.dp-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.dp-title { font-size: 1rem; font-weight: 700; }
+.dp-subtitle { font-size: .78rem; color: var(--text3); margin-top: 2px; }
+.dp-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.slots-body { padding: 16px 20px; }
+.slot-group { margin-bottom: 20px; }
+.slot-group-title { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--text3); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.slot-card { border: 1.5px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
+.slot-card.s-open { border-color: #86efac; background: #f0fdf4; }
+.slot-card.s-mid { border-color: #fcd34d; background: #fffbeb; }
+.slot-card.s-full { border-color: #fca5a5; background: #fef2f2; }
+.slot-card.s-locked { border-color: var(--border); background: #f9fafb; opacity: .7; }
+.slot-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+.slot-time { font-weight: 700; font-size: .88rem; min-width: 80px; }
+.slot-count-text { font-size: .78rem; color: var(--text3); flex: 1; }
+.slot-progress { width: 70px; height: 5px; background: var(--border2); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+.slot-progress-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.s-open .slot-progress-fill { background: var(--green); }
+.s-mid .slot-progress-fill { background: var(--orange); }
+.s-full .slot-progress-fill { background: var(--red); }
+.s-locked .slot-progress-fill { background: var(--text3); }
+.slot-badge { font-size: .67rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; flex-shrink: 0; }
+.sb-open { background: var(--green-light); color: #15803d; }
+.sb-mid { background: var(--orange-light); color: #92400e; }
+.sb-full { background: var(--red-light); color: #991b1b; }
+.sb-locked { background: var(--surface2); color: var(--text3); }
+.slot-chevron { color: var(--text3); font-size: .75rem; transition: transform .15s; }
+.slot-chevron.open { transform: rotate(180deg); }
+.locked-msg { padding: 0 14px 8px; font-size: .74rem; color: var(--text3); font-style: italic; }
+.slot-body { padding: 0 14px 12px; }
+.athletes-list { margin-bottom: 8px; }
+.ath-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.ath-row:last-child { border-bottom: none; }
+.ath-num { font-size: .7rem; color: var(--text3); min-width: 18px; }
+.ath-name { flex: 1; font-weight: 500; }
+.ath-role-badge { font-size: .67rem; padding: 1px 7px; border-radius: 20px; font-weight: 600; flex-shrink: 0; }
+.role-athlete { background: #e0f2fe; color: #0369a1; }
+.role-encadrant { background: #f3e8ff; color: #7c3aed; }
+.ath-actions { display: flex; gap: 3px; }
+.ath-btn { background: none; border: none; cursor: pointer; color: var(--text3); font-size: .78rem; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all .12s; }
+.ath-btn:hover { background: var(--surface2); }
+.ath-btn.del:hover { color: var(--red); background: var(--red-light); }
+.ath-btn.mv:hover { color: var(--accent); background: var(--accent-light); }
+.empty-slot { padding: 6px 0; font-size: .8rem; color: var(--text3); font-style: italic; }
+.add-form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.field { border: 1.5px solid var(--border2); border-radius: var(--radius-sm); padding: 6px 10px; font-size: .82rem; color: var(--text); background: white; outline: none; transition: border-color .12s; }
+.field:focus { border-color: var(--accent); }
+.full-msg { text-align: center; padding: 6px; font-size: .78rem; color: var(--red); font-weight: 600; }
+
+/* Admin */
+.admin-section { margin-top: 20px; background: white; border: 1.5px solid #bfdbfe; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.admin-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; }
+.admin-card-title { font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: var(--text3); margin-bottom: 12px; font-weight: 700; }
+.toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.toggle-wrap { width: 40px; height: 22px; background: var(--border2); border-radius: 11px; cursor: pointer; position: relative; transition: background .15s; flex-shrink: 0; }
+.toggle-wrap.on { background: var(--accent); }
+.toggle-wrap::after { content:''; position: absolute; width: 16px; height: 16px; background: white; border-radius: 50%; top: 3px; left: 3px; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle-wrap.on::after { left: 21px; }
+.prio-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.prio-row:last-child { border-bottom: none; }
+.prio-btn { width: 26px; height: 26px; border: 1px solid var(--border2); background: white; border-radius: 4px; cursor: pointer; font-size: .75rem; display: flex; align-items: center; justify-content: center; color: var(--text2); transition: all .12s; }
+.prio-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cap-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.cap-row:last-child { border-bottom: none; }
+.cap-input { width: 56px; border: 1px solid var(--border2); border-radius: 4px; padding: 3px 6px; font-size: .82rem; text-align: center; }
+
+/* Modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal-box { background: white; border-radius: var(--radius); padding: 24px; max-width: 420px; width: 92%; box-shadow: 0 20px 60px rgba(0,0,0,.15); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; right: 24px; background: #1f2937; color: white; border-radius: var(--radius-sm); padding: 10px 18px; font-size: .84rem; font-weight: 500; z-index: 500; opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; max-width: 300px; }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.t-success { background: #15803d; }
+.toast.t-error { background: var(--red); }
+
+@media(max-width:640px){
+  .admin-grid { grid-template-columns: 1fr; }
+  .week-grid { gap: 2px; }
+  .wk-slot { padding: 3px 3px; }
+  .cal-title { font-size: .88rem; min-width: auto; }
+  .slots-body { padding: 12px; }
+  .dp-header { flex-direction: column; align-items: flex-start; }
+}
+`
